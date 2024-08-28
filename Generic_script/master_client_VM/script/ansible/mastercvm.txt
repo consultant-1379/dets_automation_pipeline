@@ -1,0 +1,6 @@
+[mcvm]
+mastercvm9 ansible_host=214.5.198.20 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'

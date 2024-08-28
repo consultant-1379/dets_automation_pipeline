@@ -1,0 +1,86 @@
+def CommonMethods_evnfm
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+            HOME_DIR = "${WORKSPACE}"
+            minio_mc_docker_image = "armdocker.rnd.ericsson.se/minio/mc:latest"
+            DeploymentPemFilePath = "sts-cni/ccd/ccd-${environment_name}/ccd-${environment_name}.director.pem"
+            DeploymentIPPath = "sts-cni/ccd/ccd-${environment_name}/ccd-${environment_name}.directorvip.yml"
+            miniourl = "http://10.120.151.122:9000"
+            CCD_DIR = "/home/eccd"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    CommonMethods_evnfm = load("${env.WORKSPACE}/EVNFM_pipeline/JobDsl/CommonMethods_evnfm.groovy")
+                }
+            }
+        }
+         stage( 'Pre Configurations' ) {
+             steps {
+                 configFileProvider([configFile(fileId: 'evnfm_backup', targetLocation: 'evnfm_backup.sh')]) {}
+                 withCredentials([usernamePassword(credentialsId: 'miniosecret', passwordVariable: 'minioP', usernameVariable: 'minioS')]) {
+                     script{
+                        
+                         CommonMethods_evnfm.fetchDataFromMinio()
+                         CommonMethods_evnfm.getDirectorIP()
+                         CommonMethods_evnfm.permissionChange()
+                     }
+                 }
+             }
+         }
+         stage( 'Run Backup Script' ){
+             steps{
+                 script{
+                     sh "echo 'Hello'"
+                     CommonMethods_evnfm.evnfmBackup()
+                 }
+             }
+         }
+            }
+
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "#${BUILD_NUMBER}-EVNFM backup: ${environment_name}"
+                cleanWs disableDeferredWipeout: true
+            }
+        }
+    }
+}

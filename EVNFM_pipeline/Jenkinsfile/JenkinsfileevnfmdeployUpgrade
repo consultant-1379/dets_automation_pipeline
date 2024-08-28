@@ -1,0 +1,141 @@
+def CommonMethods_evnfm
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+            HOME_DIR = "${WORKSPACE}"
+            minio_mc_docker_image = "armdocker.rnd.ericsson.se/minio/mc:latest"
+            DeploymentPemFilePath = "sts-cni/ccd/ccd-${environment_name}/ccd-${environment_name}.director.pem"
+            DeploymentIPPath = "sts-cni/ccd/ccd-${environment_name}/ccd-${environment_name}.directorvip.yml"
+            DeploymentCertPath = "sts-cni/ccd/ccd-${environment_name}/certificates/"
+            miniourl = "http://10.120.151.122:9000"
+            CCD_DIR = "/home/eccd"
+            evnfmfqdn = "${EVNFM_fqdn}"
+            sftpuser = "${sftp_user_name}"
+            sftppass = "${sftp_password}"
+            sftpip = "${sftp_server_vp5_ip}"
+            evnfmRbacUsername = "${evnfm_rbac_username}"
+            evnfmRbacPassword = "${evnfm_rbac_password}"
+            namespace = "${namespace}"
+            HELM_TIMEOUT= "3600"
+    }
+
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    CommonMethods_evnfm = load("${env.WORKSPACE}/EVNFM_pipeline/JobDsl/CommonMethods_evnfm.groovy")
+                }
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'miniosecret', passwordVariable: 'minioP', usernameVariable: 'minioS')]) {
+                    script{
+                        
+                        CommonMethods_evnfm.fetchDataFromMinio()
+                        CommonMethods_evnfm.getDirectorIP()
+                        CommonMethods_evnfm.permissionChange()
+                    }
+                }
+            }
+        }
+        stage('evnfm Deploy Pre-Configuration task'){
+            when {
+                 environment name: 'deployment_type', value: 'install'
+            }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'miniosecret', passwordVariable: 'minioP', usernameVariable: 'minioS')]) {
+                    script{
+                        CommonMethods_evnfm.evnfmDeployPreTask()
+                        CommonMethods_evnfm.fetchcertFromMinioAndTransfer()
+                    }
+                }
+            }
+        }
+        stage('evnfm Upgrade Pre-Configuration task'){
+            when {
+                 environment name: 'deployment_type', value: 'upgrade'
+            }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'miniosecret', passwordVariable: 'minioP', usernameVariable: 'minioS')]) {
+                    script{
+                        CommonMethods_evnfm.evnfmUpgradePreTask()
+                        CommonMethods_evnfm.fetchcertFromMinioAndTransfer()
+                    }
+                }
+            }
+        }
+        stage('evnfm Site Value file preparation'){
+            steps {
+                script{
+                    CommonMethods_evnfm.siteValueFilePreparation()
+                }
+            }
+        }
+        stage('evnfm Deploy'){
+            when {
+                 environment name: 'deployment_type', value: 'install'
+            }
+            steps {
+                script{
+                    CommonMethods_evnfm.evnfmDeployUpgrade()
+                }
+            }
+        }
+        stage('evnfm upgrade'){
+            when {
+                 environment name: 'deployment_type', value: 'upgrade'
+            }
+            steps {
+                script{
+                    CommonMethods_evnfm.evnfmDeployUpgrade()
+                }
+            }
+        }
+
+    }
+
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "#${BUILD_NUMBER}-EVNFM ${deployment_type}: ${environment_name}"
+                 cleanWs disableDeferredWipeout: true
+            }
+        }
+    }
+}

@@ -1,0 +1,117 @@
+def CommonMethods_cenm
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+            HOME_DIR = "${WORKSPACE}"
+            cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+            nexus_repositoryUrl = "https://arm902-eiffel004.athtem.eei.ericsson.se:8443/nexus/content/repositories/releases/"
+            helm_repository_release = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-helm/"
+            helm_repository_ci_internal = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/"
+            csar_package_name = "enm-installation-package"
+            Client_HOME = "/home/cenmbuild"
+            BUR_INVENTORY = "burInventory.csv"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+            steps{
+                deleteDir()
+            }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+                //clone_ci_repo()
+                //pullPatchset()
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    CommonMethods_cenm = load("${env.WORKSPACE}/cENM_pipeline/Jenkins/JobDSL/CommonMethods_cenm.groovy")
+                }
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                script{
+                      CommonMethods_cenm.extract_jq()
+                      CommonMethods_cenm.clusterID()
+                }
+            }
+        }
+        stage('client VM list'){
+            steps {
+                script{
+                    CommonMethods_cenm.clientvmlist()
+                    //sh "echo 'skipping'"
+                }
+            }
+        }
+        stage('client VM Update'){
+            when {
+                environment name: 'clientvmIpUpdate', value: 'Yes'
+            }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'detsFunUser', passwordVariable: 'detspassword', usernameVariable: 'detsusername')]) {
+                    script{
+                        CommonMethods_cenm.cvm_update_pre_check()
+                        CommonMethods_cenm.cvm_update()
+                    }
+                }
+            }
+        }
+
+    }
+    
+
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "#${BUILD_NUMBER}-cENM_ClientvmCheck: ${environment_name}"
+            }
+        }
+    }
+}
+
+def clone_ci_repo(){
+   sh '''
+       [ -d eric-enm-integration-pipeline-code ] && rm -rf eric-enm-integration-pipeline-code
+        git clone ${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+   '''
+}
+/*
+def pullPatchset(){
+    if (env.GERRIT_REFSPEC !='' && env.GERRIT_REFSPEC != "refs/heads/master") {
+        sh '''
+        pwd
+        cd dets_automation_pipeline
+        pwd
+        git fetch ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline $GERRIT_REFSPEC && git checkout FETCH_HEAD
+        '''
+    }
+}*/

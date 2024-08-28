@@ -1,0 +1,8 @@
+-
+    name: client Machine management
+    hosts: ccdclient
+    become: yes
+    become_user: root
+    
+    roles:
+            - ccdclient_manage

@@ -1,0 +1,198 @@
+def commonMethods
+//def CommonMethods_cenm
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    options {
+        timeout(time: 11, unit: 'HOURS')
+    }
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+        nexus_repositoryUrl = "https://arm902-eiffel004.athtem.eei.ericsson.se:8443/nexus/content/repositories/releases/"
+        helm_repository_release = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-helm/"
+        helm_repository_ci_internal = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/"
+        csar_package_name = "enm-installation-package"
+        Client_HOME ="/home/cenmbuild"
+        OQS_URL="https://atvoqs.athtem.eei.ericsson.se/api/deployments"
+        BUR_INVENTORY = "burInventory.csv"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout dets_automation Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+                clone_integration_repo()
+                //pullPatchset()
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/eric-enm-integration-pipeline-code/Jenkins/JobDSL/CommonMethods.groovy")
+                    CommonMethods_cenm = load("${env.WORKSPACE}/cENM_pipeline/Jenkins/JobDSL/CommonMethods_cenm.groovy")
+                }
+            }
+        }
+        stage( 'setup_kubeconfig_file_for_cluster' ) {
+            steps {
+                configFileProvider([configFile(fileId: "burInventory.csv", targetLocation: "${env.WORKSPACE}")]) {}
+                configFileProvider([configFile(fileId: "inventory.csv", targetLocation: "${env.WORKSPACE}")]) {}
+                script{
+                      CommonMethods_cenm.extract_jq()
+                      CommonMethods_cenm.createDir()
+                      commonMethods.download_kube_config_file_from_dit()
+                      CommonMethods_cenm.install_kube()
+                      commonMethods.read_site_config_info_from_dit()
+                      commonMethods.set_kube_config_file()
+                      commonMethods.get_cn_build_version_info()
+               }
+            }
+        }
+        /*stage('Clean CSAR folder and delete and pull utilities image in client machine'){
+            when {
+                allOf{
+                    environment name: 'deployment_mechanism', value: 'csar'
+                    expression{env.CLIENT_MACHINE_TYPE  =='client_machine'}
+                   }
+             }
+              steps{
+                  script{
+                        CommonMethods_cenm.client_cleancsar()
+                        }
+                    }
+             }
+        stage( 'Download CSAR PACKAGE from nexus area' ) {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'csar'
+                     environment name: 'stage_area', value: 'ci_internal'
+                 }
+            }
+            steps {
+              script{
+                retry(3){
+                  commonMethods.download_csar_package_nexus()
+                }
+              }
+            }
+        }
+        stage( 'Download CSAR PACKAGE from release area' ) {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'csar'
+                     environment name: 'stage_area', value: 'drop'
+                 }
+            }
+            steps {
+               script{
+                retry(3){
+                    commonMethods.download_csar_package_release()
+                }
+               }
+            }
+        }
+        stage('Extract csar package') {
+            when {
+                 environment name: 'deployment_mechanism', value: 'csar'
+            }
+            steps {
+                script {
+                       commonMethods.extract_csar_package()
+                       commonMethods.get_integration_charts_version()
+                }
+            }
+        }*/
+        stage('Download Charts from CI Internal') {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'charts'
+                     environment name: 'stage_area', value: 'ci_internal'
+                 }
+            }
+            steps {
+                script {
+                   commonMethods.csar_pre_config_setup()
+                   commonMethods.download_charts_ci_internal()
+                   commonMethods.remove_tgz_with_artifacts()
+                }
+            }
+        }
+        stage('Download Charts from Release area') {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'charts'
+                     environment name: 'stage_area', value: 'drop'
+                 }
+            }
+            steps {
+                script {
+                   commonMethods.csar_pre_config_setup()
+                   commonMethods.download_charts_release_area()
+                   commonMethods.remove_tgz_with_artifacts()
+                }
+            }
+        }
+        stage('Updating integration values'){
+            steps{
+                script{
+                       if(env.CLIENT_MACHINE_TYPE =='client_machine' && env.deployment_mechanism =='csar'){
+                               commonMethods.client_integrationvaluepath()
+                               commonMethods.updateIntegrationValues()
+                               commonMethods.client_pushfile()
+                          }
+                       else{
+                             commonMethods.remove_yaml_with_artifacts()
+                             commonMethods.get_integration_charts_path()
+                             commonMethods.updateIntegrationValues()
+                             commonMethods.overriding_key_value_pairs()
+                          }
+                }
+            }
+        }
+    }
+    post{
+        failure {
+            script{
+                   echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                  echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "SED populate with ${deployment_mechanism} on: ${environment_name}"
+                sh("cat ${HOME_DIR}/cENM/Scripts/${integration_values_file_path}")
+                archiveArtifacts "cENM/Scripts/${integration_values_file_path}"
+            }
+        }
+    }
+}
+
+def clone_integration_repo(){
+   sh '''
+       [ -d eric-enm-integration-pipeline-code ] && rm -rf eric-enm-integration-pipeline-code
+        git clone ${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+   '''
+}

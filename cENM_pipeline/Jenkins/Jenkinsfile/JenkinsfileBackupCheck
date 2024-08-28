@@ -1,0 +1,189 @@
+//def commonMethods
+def CommonMethods_cenm
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+            HOME_DIR = "${WORKSPACE}"
+            cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+            nexus_repositoryUrl = "https://arm902-eiffel004.athtem.eei.ericsson.se:8443/nexus/content/repositories/releases/"
+            helm_repository_release = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-helm/"
+            helm_repository_ci_internal = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/"
+            csar_package_name = "enm-installation-package"
+            Client_HOME = "/home/cenmbuild"
+            BUR_INVENTORY = "burInventory.csv"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+            steps{
+                deleteDir()
+            }
+        }
+        /*stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                clone_Integration_repo()
+                clone_dets_repo()
+                pullPatchset()
+            }
+        }*/
+        stage('Checkout dets_automation Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+                clone_Integration_repo()
+                //pullPatchset()
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    //commonMethods = load("${env.WORKSPACE}/eric-enm-integration-pipeline-code/Jenkins/JobDSL/CommonMethods.groovy")
+                    CommonMethods_cenm = load("${env.WORKSPACE}/cENM_pipeline/Jenkins/JobDSL/CommonMethods_cenm.groovy")
+                }
+            }
+        }
+        /*stage('Delete docker image') {
+            steps {
+                script {
+                    CommonMethods_cenm.delete_build_utilities_image()
+                }
+            }
+        }
+        stage('Pull docker image') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                }
+            }
+        }*/
+        stage( 'Pre Configurations' ) {
+            steps {
+                configFileProvider([configFile(fileId: "${env.BUR_INVENTORY}", targetLocation: "${env.WORKSPACE}")]) {}
+                configFileProvider([configFile(fileId: "inventory.csv", targetLocation: "${env.WORKSPACE}")]) {}
+                script{
+                    //CommonMethods_cenm.clusterID()
+                    CommonMethods_cenm.extract_jq()
+                    CommonMethods_cenm.domainIPGet()
+                    //CommonMethods_cenm.download_kube_config_file_from_dit()
+                    //CommonMethods_cenm.read_site_config_info_from_dit_short()
+                    //CommonMethods_cenm.set_kube_config_file()
+                    //CommonMethods_cenm.brocli_configuration()
+
+                }
+            }
+        }
+        stage('Is cENM alive'){
+            steps {
+                catchError(stageResult: 'FAILURE') {
+                    script{
+                        CommonMethods_cenm.smokeTest_backup()
+                    }
+                }
+            }
+        }
+        /*stage('mcvm to ccd server connection check'){
+            steps {
+                script{
+                    //CommonMethods_cenm.mcvmMasterSshCheck()
+                    //CommonMethods_cenm.mcvmMasterKubeCheck()
+                }
+            }
+        }*/
+        stage('cENM level Backup List'){
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'sftp_backup_seli', keyFileVariable: 'sftp_backup_seli' )]) {
+                    catchError(stageResult: 'FAILURE') {
+                        script{
+                            //CommonMethods_cenm.backupHealthCheck()
+                            CommonMethods_cenm.cenmLevelBackupCheck()
+                        }
+                    }
+                }
+            }
+        }
+        stage('sftp server Backup List'){
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'sftp_backup_seli', keyFileVariable: 'sftp_backup_seli' )]) {
+                    catchError(stageResult: 'FAILURE') {
+                        script{
+                            CommonMethods_cenm.sftpServerLevelCheck()
+                            CommonMethods_cenm.cronjobCheck()
+                        }
+                    }
+                }
+            }
+        }
+        stage('Backup integrity check'){
+            steps {
+                catchError(stageResult: 'FAILURE') {
+                    script{
+                        CommonMethods_cenm.lastBackupCheck()
+                    }
+                }
+            }
+        }
+    }
+
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "#${BUILD_NUMBER}-cENM_BackupHealthCheck: ${environment_name}"
+                archiveArtifacts artifacts: "cenmBackupCheckResult.txt", allowEmptyArchive: true
+                archiveArtifacts artifacts: "sftp_cenmBackupCheckResult.txt", allowEmptyArchive: true
+                archiveArtifacts artifacts: "cenmBackupMatchFile.txt", allowEmptyArchive: true
+                archiveArtifacts artifacts: "RunningcENM", allowEmptyArchive: true
+                archiveArtifacts artifacts: "NotRunningcENM", allowEmptyArchive: true
+                archiveArtifacts artifacts: "sftpServerChecks", allowEmptyArchive: true
+                archiveArtifacts artifacts: "failedLastBackupCheckcenm", allowEmptyArchive: true
+            }
+        }
+    }
+}
+
+def clone_Integration_repo(){
+   sh '''
+       [ -d eric-enm-integration-pipeline-code ] && rm -rf eric-enm-integration-pipeline-code
+        git clone ${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+   '''
+}
+
+/*def clone_dets_repo(){
+   sh '''
+       [ -d dets_automation_pipeline ] && rm -rf dets_automation_pipeline
+        git clone ${GERRIT_CENTRAL}/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+   '''
+}
+
+def pullPatchset(){
+    if (env.GERRIT_REFSPEC !='' && env.GERRIT_REFSPEC != "refs/heads/master") {
+        sh '''
+        pwd
+        cd dets_automation_pipeline
+        pwd
+        git fetch ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline $GERRIT_REFSPEC && git checkout FETCH_HEAD
+        '''
+    }
+}*/

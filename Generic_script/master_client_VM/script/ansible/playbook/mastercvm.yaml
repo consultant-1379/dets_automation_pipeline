@@ -1,0 +1,10 @@
+-
+    name: client Machine management
+    hosts: mcvm
+    become: yes
+    become_user: root
+    tasks:
+         - name: Document root creation
+           file:
+            state: directory
+            dest: "/home/cenmbuild/mastercvm9"

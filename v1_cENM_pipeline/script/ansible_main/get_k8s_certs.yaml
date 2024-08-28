@@ -1,0 +1,23 @@
+---
+- name: Copy kube certs to cvm
+  hosts: clientMachine
+  become: yes
+  become_user: root
+  tasks:
+    - name: Ping Test
+      ping:
+    - name: Hostname name Display
+      command: "hostname"
+      register: logs
+    - debug: var=logs.stdout
+    - name: Copy cert to all cENM required cenm
+      copy:
+        src: "{{ file_path }}/dockerRegistryInsecure"
+        dest: "/etc/docker/daemon.json"
+        owner: root
+        group: root
+        mode: 0644
+    - name: docker restart
+      service:
+        name: docker
+        state: restarted

@@ -1,0 +1,21 @@
+[ccdclient]
+ccd-client-n49p1 ansible_host=214.14.16.21 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n49p2 ansible_host=214.14.16.22 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+#ccd-client-n49p3 ansible_host=214.14.16.23 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n49p4 ansible_host=214.14.16.24 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n49p5 ansible_host=214.14.16.25 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n49p6 ansible_host=214.14.16.26 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n107p1 ansible_host=214.14.16.37 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n107p2 ansible_host=214.14.16.38 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n107p3 ansible_host=214.14.16.39 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n107p4 ansible_host=214.14.16.40 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n107p5 ansible_host=214.14.16.41 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-n107p6 ansible_host=214.14.16.42 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+
+[master]
+ccd-client-master-p ansible_host=214.14.16.20 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+ccd-client-master-s ansible_host=214.14.16.36 ansible_user=cenmbuild ansible_ssh_pass=Lxszgui71aPyTO2p3A5C
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'

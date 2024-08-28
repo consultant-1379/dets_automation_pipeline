@@ -1,0 +1,121 @@
+def CommonMethods_ansible
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+    }
+    parameters {
+        choice(
+            name: 'Area',
+            choices: ['manageMaster', 'manageGeneral', 'All' ],
+            description: 'For which area you want to upgrade'
+        )
+        string(
+            name: 'slave',
+            defaultValue: 'cENM'
+        )
+    }
+    environment {
+            HOME_DIR = "${WORKSPACE}"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+            steps{
+                deleteDir()
+            }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+                //clone_ci_repo()
+                //pullPatchset()
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    CommonMethods_ansible = load("${env.WORKSPACE}/Ansible/JobDsl/CommonMethods_ansible.groovy")
+                }
+            }
+        }
+        stage('Pre Task') {
+            steps {
+                script {
+                    CommonMethods_ansible.confirm_inventory_file()
+                }
+            }
+        }
+        stage( 'Ansible command to manage cvm' ) {
+            steps {
+                script{
+                    if( "${Area}" == 'All'){
+                        echo "SELI - Master"
+                        sh "ansible-playbook  -e WORKSPACE=${WORKSPACE} ${WORKSPACE}/Ansible/JobDsl/playbook/selimcvm.yaml -i ${WORKSPACE}/Ansible/JobDsl/inventory"
+                        echo "SELI - General"
+                        sh "ansible-playbook  -e WORKSPACE=${WORKSPACE} ${WORKSPACE}/Ansible/JobDsl/playbook/seligcvm.yaml -i ${WORKSPACE}/Ansible/JobDsl/inventory"
+                        echo "SERO - Master"
+                        sh "ansible-playbook  -e WORKSPACE=${WORKSPACE} ${WORKSPACE}/Ansible/JobDsl/playbook/seromcvm.yaml -i ${WORKSPACE}/Ansible/JobDsl/inventory"
+                        echo "SERO - General"
+                        sh "ansible-playbook  -e WORKSPACE=${WORKSPACE} ${WORKSPACE}/Ansible/JobDsl/playbook/serogcvm.yaml -i ${WORKSPACE}/Ansible/JobDsl/inventory"
+                    }
+                    if( "${Area}" == 'manageMaster' ){
+                        echo "${Area}"
+                        sh "ansible-playbook  -e WORKSPACE=${WORKSPACE} ${WORKSPACE}/Ansible/JobDsl/playbook/selimcvm.yaml -i ${WORKSPACE}/Ansible/JobDsl/inventory"
+                        sh "ansible-playbook  -e WORKSPACE=${WORKSPACE} ${WORKSPACE}/Ansible/JobDsl/playbook/seromcvm.yaml -i ${WORKSPACE}/Ansible/JobDsl/inventory"
+                    }
+                    if( "${Area}" == 'manageGeneral' ){
+                        echo "${Area}"
+                        sh "ansible-playbook  -e WORKSPACE=${WORKSPACE} ${WORKSPACE}/Ansible/JobDsl/playbook/seligcvm.yaml -i ${WORKSPACE}/Ansible/JobDsl/inventory"
+                        sh "ansible-playbook  -e WORKSPACE=${WORKSPACE} ${WORKSPACE}/Ansible/JobDsl/playbook/serogcvm.yaml -i ${WORKSPACE}/Ansible/JobDsl/inventory"
+                    }else{
+                        echo "Incorrect choice"
+                    }
+                }
+            }
+        }
+        
+    }
+
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "#${BUILD_NUMBER} - ${Area}"
+            }
+            //archiveArtifacts artifacts: "${environment_name}_enm_hc_report.txt,${environment_name}_SiteValue.txt", allowEmptyArchive: true
+        }
+    }
+}
+
+/*
+def pullPatchset(){
+    if (env.GERRIT_REFSPEC !='' && env.GERRIT_REFSPEC != "refs/heads/master") {
+        sh '''
+        pwd
+        cd dets_automation_pipeline
+        pwd
+        git fetch ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline $GERRIT_REFSPEC && git checkout FETCH_HEAD
+        '''
+    }
+}*/

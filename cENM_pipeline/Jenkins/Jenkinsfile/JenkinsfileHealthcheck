@@ -1,0 +1,180 @@
+def commonMethods
+def CommonMethods_cenm
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+            HOME_DIR = "${WORKSPACE}"
+            cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+            nexus_repositoryUrl = "https://arm902-eiffel004.athtem.eei.ericsson.se:8443/nexus/content/repositories/releases/"
+            helm_repository_release = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-helm/"
+            helm_repository_ci_internal = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/"
+            csar_package_name = "enm-installation-package"
+            Client_HOME = "/home/cenmbuild"
+            BUR_INVENTORY = "burInventory.csv"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+            steps{
+                deleteDir()
+            }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+                clone_ci_repo()
+                //pullPatchset()
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/eric-enm-integration-pipeline-code/Jenkins/JobDSL/CommonMethods.groovy")
+                    CommonMethods_cenm = load("${env.WORKSPACE}/cENM_pipeline/Jenkins/JobDSL/CommonMethods_cenm.groovy")
+                }
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            when {
+                environment name: 'cENM_Level_HC', value: 'Yes'
+            }
+            steps {
+                configFileProvider([configFile(fileId: "burInventory.csv", targetLocation: "${env.WORKSPACE}")]) {}
+                configFileProvider([configFile(fileId: "inventory.csv", targetLocation: "${env.WORKSPACE}")]) {}
+                script{
+                      CommonMethods_cenm.extract_jq()
+                      CommonMethods_cenm.download_kube_config_file_from_dit()
+                      CommonMethods_cenm.install_kube()
+                      CommonMethods_cenm.read_site_config_info_from_dit()
+                      CommonMethods_cenm.set_kube_config_file()
+                      CommonMethods_cenm.clusterID()
+                      CommonMethods_cenm.troubleshooting_utils_configuration()
+                      CommonMethods_cenm.brocli_configuration()
+                      CommonMethods_cenm.domainIPGet()
+                }
+            }
+        }
+        stage('CCD Level - HC'){
+            when {
+                environment name: 'CCD_Level_HC', value: 'Yes'
+            }
+            steps {
+                catchError(stageResult: 'FAILURE') {
+                    withCredentials([sshUserPrivateKey(credentialsId: 'ccd_client_master_key', keyFileVariable: 'ccd_client_master_key')]) {
+                        configFileProvider([configFile(fileId: "inventory.csv", targetLocation: "${env.WORKSPACE}")]) {}
+                        script{
+                            CommonMethods_cenm.clusterID()
+                            CommonMethods_cenm.CCD_HC()
+                        }
+                    }
+                }
+            }
+        }
+        stage('cENM Level - HC'){
+            when {
+                environment name: 'cENM_Level_HC', value: 'Yes'
+            }
+            stages {
+                stage('cENM HC - verbose'){
+                    steps {
+                        catchError(stageResult: 'FAILURE') {
+                            script{
+                                CommonMethods_cenm.cenmHCD()
+                            }
+                        }
+                    }
+                }
+                stage('Backup List') {
+                    steps {
+                        withCredentials([sshUserPrivateKey(credentialsId: 'sftp_backup_seli', keyFileVariable: 'sftp_backup_seli' )]) {
+                            catchError(stageResult: 'FAILURE') {
+                                script{
+                                    CommonMethods_cenm.backupList_cENM()
+                                }
+                            }
+                        }
+                    }
+                }
+                stage('cENM HC - short') {
+                    steps {
+                        catchError(stageResult: 'FAILURE') {
+                            script{
+                                CommonMethods_cenm.cenmHCS()
+                            }
+                        }
+                    }
+                }
+                stage('cENM version') {
+                    steps {
+                        catchError(stageResult: 'FAILURE') {
+                            script{
+                                CommonMethods_cenm.cenmVersion()
+                            }
+                        }
+                    }
+                }
+                stage('cENM site value file extraction') {
+                    steps {
+                        catchError(stageResult: 'FAILURE') {
+                            script{
+                                CommonMethods_cenm.cenmValueFromSED()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "#${BUILD_NUMBER}-cENM_HealthCheck: ${environment_name}"
+            }
+            archiveArtifacts artifacts: "${environment_name}_enm_hc_report.txt,${environment_name}_SiteValue.txt", allowEmptyArchive: true
+        }
+    }
+}
+
+def clone_ci_repo(){
+   sh '''
+       [ -d eric-enm-integration-pipeline-code ] && rm -rf eric-enm-integration-pipeline-code
+        git clone ${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+   '''
+}
+
+/*
+def pullPatchset(){
+    if (env.GERRIT_REFSPEC !='' && env.GERRIT_REFSPEC != "refs/heads/master") {
+        sh '''
+        pwd
+        cd dets_automation_pipeline
+        pwd
+        git fetch ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline $GERRIT_REFSPEC && git checkout FETCH_HEAD
+        '''
+    }
+}*/

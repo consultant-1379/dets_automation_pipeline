@@ -1,0 +1,63 @@
+################## SELI RSYNC #################
+### --> 214.5.198.30
+00 20 * * * rsync -azvr -e "ssh" /cn_backup_data/ root@10.41.0.4:/cn_backup_data
+
+### --> 10.82.13.62
+00 20 * * * rsync -azvr -e "ssh" /cn_backup_data/ root@214.14.16.46:/cn_backup_data
+
+################## SERO RSYNC ################
+### --> 10.41.0.4
+00 22 * * * rsync -azvr -e "ssh" /cn_backup_data/ root@214.5.198.30:/cn_backup_data
+
+### --> 214.14.16.46
+00 22 * * * rsync -azvr -e "ssh" /cn_backup_data/ root@10.82.13.62:/cn_backup_data
+
+
+================================================================  Retension script from root ================
+each backup server has retenion check place.
+script name:  "/root/retentionScript/cenmRetentionCheck.sh"
+
+## cronjob 
+00 21 * * * /root/retentionScript/cenmRetentionCheck.sh
+
+############################ script
+
+#! /bin/bash
+
+rm -rf /root/retentionScript/not_to_remove
+rm -rf /root/retentionScript/cenm_backup_to_remove
+
+echo "DEFAULT Backup dir set"
+cENM_default=$(find /cn_backup_data/ -type d | grep DEFAULT)
+
+echo "rollback one"
+cENM_rollback=$(find /cn_backup_data/ -type d | grep ROLLBACK)
+
+echo "removal of default one"
+for i in ${cENM_default} ${cENM_rollback}
+do
+  count=$(ls -lrth ${i} | grep -v total | awk '{print $9}' | wc -l)
+  if [[ ${count} -gt 4 ]]
+  then
+    trim=$((${count} - 4))
+    echo "trim for ${i}"
+    echo ${trim}
+    ls -lrth ${i} | grep -v total | awk '{print $9}' | head -${trim} >> /root/retentionScript/cenm_backup_to_remove
+    ls -lrth ${i} | tail -4 | awk '{print $9}' >> /root/retentionScript/not_to_remove
+  fi
+done
+
+### remove one #####
+
+if [[ -f /root/retentionScript/cenm_backup_to_remove ]]
+then
+  for i in $(cat /root/retentionScript/cenm_backup_to_remove)
+  do
+    echo "File removing ${i}"
+    #find /sftp_new/CNIS -name ${i}
+    find /cn_backup_data/ -name ${i} -exec rm -rf {} \;
+    echo "==File removing ${i}=="
+  done
+else
+  echo "No cENM backup data to remove"
+fi

@@ -1,0 +1,44 @@
+-
+    name: ____SELI_____ Master - client Machine Management __________
+    hosts: selimcvm
+    become: yes
+    become_user: root
+    tasks:
+      - name: Ping Test
+        ping:
+      - name: Hostname name Display
+        command: "hostname"
+        register: logs
+      - debug: var=logs.stdout
+      - name: DNS entry file update
+        copy:
+          src: "{{ WORKSPACE }}/Ansible/JobDsl/files/seli_cvmdnsentry"
+          dest: /etc/systemd/resolved.conf
+          owner: root
+          group: root 
+      - name: Reload Network
+        command: "systemctl daemon-reload"
+        command: "systemctl restart systemd-resolved"
+        command: "sleep 5"               
+      - name: First folder creation
+        file:
+          state: directory
+          dest: "{{ item }}"
+          owner: cenmbuild
+          group: cenmbuild
+        with_items:
+          - "/home/cenmbuild/seli_mastercvm"         
+      - name: Ubuntu all package upgrade
+        apt: upgrade=dist force_apt_get=yes
+      - name: Check if a reboot is needed for Debian and Ubuntu boxes
+        register: reboot_required_file
+        stat: path=/var/run/reboot-required get_md5=no
+      - name: Reboot the Debian or Ubuntu server
+        reboot:
+          msg: "Reboot initiated by Ansible due to kernel updates"
+          connect_timeout: 5
+          reboot_timeout: 300
+          pre_reboot_delay: 0
+          post_reboot_delay: 30
+          test_command: uptime
+        when: reboot_required_file.stat.exists

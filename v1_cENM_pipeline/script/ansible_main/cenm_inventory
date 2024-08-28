@@ -1,0 +1,27 @@
+[selimcvm]
+mastercvm9  ansible_host=214.5.198.20   ansible_user=cenmbuild
+mastercvm91 ansible_host=214.5.198.30   ansible_user=cenmbuild
+
+[seromcvm]
+ccd-client-master-p ansible_host=214.14.16.20   ansible_user=cenmbuild
+burserver31         ansible_host=10.41.0.4      ansible_user=cenmbuild
+ccd-client-master-s ansible_host=214.14.16.36   ansible_user=cenmbuild
+mastercvm61         ansible_host=214.14.16.46   ansible_user=cenmbuild
+
+[clientMachine]
+
+jenkin-client-m1 ansible_host=10.129.168.203 ansible_user=cenmbuild
+jenkin_client-m2 ansible_host=10.129.168.204 ansible_user=cenmbuild
+jenkin_client-s1 ansible_host=10.129.168.205 ansible_user=cenmbuild
+jenkin_client-s2 ansible_host=10.129.168.206 ansible_user=cenmbuild
+
+[mcvm_main:children]
+selimcvm
+seromcvm
+
+[mcvm_main:vars]
+ansible_ssh_pass="{{ mcvm_pass }}"
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'

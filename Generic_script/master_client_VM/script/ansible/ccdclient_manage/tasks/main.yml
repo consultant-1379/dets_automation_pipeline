@@ -1,0 +1,35 @@
+---
+
+- name: ping test
+  ping:
+
+- name: docker-compose install
+  apt:
+    name: docker-compose
+    update_cache: yes
+    state: present
+  register: output
+- name: help notify
+  debug:
+    msg: "command output {{ output }}"
+
+- name: copy docker file to remote server
+  copy:
+    src: ccdclient_manage/files/node_exporter.yaml
+    dest: /etc/docker/docker-compose.yaml
+    owner: root
+    group: root
+    mode: 0700
+
+- name:
+  command: docker-compose -f /etc/docker/docker-compose.yaml up -d
+
+- name: running container status
+  command: docker ps -a
+  register: output
+
+- name: check docker status
+  debug:
+    msg: "{{ output }}"
+
+# tasks file for ccdclient_manage

@@ -1,0 +1,36 @@
+-
+    name: client Machine management
+    hosts: ccdclient
+    become: yes
+    become_user: root
+    tasks:
+      - name: update of OS
+        apt:
+         update_cache: true
+         upgrade: dist
+         cache_valid_time: 3000
+         force_apt_get: true
+       
+      - name: kubernetes package install
+        apt:
+          name: kubectl
+          update_cache: yes
+          state: present
+
+      - name: helm script download
+        get_url:
+          url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          dest: /home/cenmmbuild
+          mode: 0777
+
+      - name: deploy helm
+        command: bash /home/cenmmbuild/get-helm-3
+
+      - name: create user
+        user:
+          name: eccd
+          password: Mydgurq6gaYO2f6A6Il
+          groups:
+            - wheel
+          state: present
+

@@ -1,0 +1,414 @@
+def commonMethods
+def CommonMethods_cenm
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        Client_HOME = "/home/cenmbuild"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+        nexus_repositoryUrl = "https://arm902-eiffel004.athtem.eei.ericsson.se:8443/nexus/content/repositories/releases/"
+        helm_repository_release = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-helm/"
+        helm_repository_ci_internal = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/"
+        csar_package_name = "enm-installation-package"
+        BUR_INVENTORY = "burInventory.csv"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+                clone_ci_repo()
+                //pullPatchset()
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/eric-enm-integration-pipeline-code/Jenkins/JobDSL/CommonMethods.groovy")
+                    CommonMethods_cenm = load("${env.WORKSPACE}/cENM_pipeline/Jenkins/JobDSL/CommonMethods_cenm.groovy")
+                }
+            }
+        }
+        stage('Delete docker image') {
+            steps {
+                script {
+                    commonMethods.delete_build_utilities_image()
+                }
+            }
+        }
+        stage('Pull docker image') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                script{
+                      CommonMethods_cenm.extract_jq()
+                      CommonMethods_cenm.createDir()
+                      commonMethods.download_kube_config_file_from_dit()
+                      commonMethods.read_site_config_info_from_dit()
+                      commonMethods.get_cn_build_version_info()
+                      commonMethods.set_kube_config_file()
+                      CommonMethods_cenm.domainIPGet()
+                      CommonMethods_cenm.domainCheck()
+               }
+            }
+        }
+        stage('Clean CSAR folder in client machine'){
+            when {
+                allOf{
+                    environment name: 'deployment_mechanism', value: 'csar'
+                    expression{env.CLIENT_MACHINE_TYPE  =='client_machine'}
+                }
+            }
+            steps{
+                script{
+                    commonMethods.client_cleancsar()
+                }
+            }
+        }
+        stage( 'Login docker registry' ) {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'csar'
+                     expression{env.CONTAINER_REGISTRY_USERNAME != ''}
+                     expression{env.CONTAINER_REGISTRY_PASSWORD != ''}
+                 }
+            }
+            steps {
+               script{
+                 commonMethods.create_docker_secret()
+              }
+            }
+        }
+        stage( 'Download CSAR PACKAGE from nexus area' ) {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'csar'
+                     environment name: 'stage_area', value: 'ci_internal'
+                 }
+            }
+            steps {
+              script{
+                retry(3){
+                  commonMethods.download_csar_package_nexus()
+                }
+              }
+            }
+        }
+        stage( 'Download CSAR PACKAGE from release area' ) {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'csar'
+                     environment name: 'stage_area', value: 'drop'
+                 }
+            }
+            steps {
+               script{
+                retry(3){
+                  commonMethods.download_csar_package_release()
+                }
+               }
+            }
+        }
+        stage('Extract csar package') {
+            when {
+                 environment name: 'deployment_mechanism', value: 'csar'
+            }
+            steps {
+                script {
+                       commonMethods.extract_csar_package()
+                       commonMethods.get_integration_charts_version()
+                }
+            }
+        }
+        stage('Perform Load/Retag/Push') {
+            when {
+                allOf {
+                    environment name: 'deployment_mechanism', value: 'csar'
+                    environment name: 'Docker_Load', value: 'Yes'
+                }
+            }
+            steps {
+                script {
+                        commonMethods.csar_utils()
+                }
+            }
+        }
+        stage('Download Charts from CI Internal') {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'charts'
+                     environment name: 'stage_area', value: 'ci_internal'
+                 }
+            }
+            steps {
+                script {
+                   commonMethods.csar_pre_config_setup()
+                   commonMethods.download_charts_ci_internal()
+                }
+            }
+        }
+        stage('Download Charts from Release area') {
+            when {
+                 allOf {
+                     environment name: 'deployment_mechanism', value: 'charts'
+                     environment name: 'stage_area', value: 'drop'
+                 }
+            }
+            steps {
+                script {
+                   commonMethods.csar_pre_config_setup()
+                   commonMethods.download_charts_release_area()
+                }
+            }
+        }
+        stage('Updating integration values'){
+            steps{
+                script{
+                    if(env.CLIENT_MACHINE_TYPE =='client_machine' && env.deployment_mechanism =='csar'){
+                        commonMethods.client_integrationvaluepath()
+                        commonMethods.updateIntegrationValues()
+                        commonMethods.client_pushfile()
+                    }
+                    else{
+                        commonMethods.get_integration_charts_path()
+                        commonMethods.updateIntegrationValues()
+                    }
+                }
+            }
+        }
+        stage('brocli configuration'){
+            when {
+                 expression{env.product_set_version < "22.08.38" }
+            }
+            steps {
+                script{
+                    commonMethods.brocli_configuration()
+                }
+            }
+        }
+        stage('Restore Uninstall with csar'){
+            when {
+                environment name: 'deployment_mechanism', value: 'csar'
+            }
+            steps{
+                script{
+                    commonMethods.csar_uninstall()
+                }
+            }
+        }
+        stage('Install cENM BRO chart'){
+            when {
+                 expression{env.bro_chart_version != ''}
+            }
+            steps{
+                script{
+                    commonMethods.start_time_deployment()
+                    commonMethods.bro_integration_chart("install","600s")
+                    if(env.product_set_version < "22.08.38"){
+                        commonMethods.restore_bro_and_fetch_product_number()
+                    }
+                    else{
+                        CommonMethods_cenm.create_sftpmachine_secret()
+                    }
+                }
+             }
+         }
+        stage('Import restore') {
+                     when {
+                        expression{env.product_set_version < "22.08.38" }
+                     }
+                     steps {
+                         script{
+                             sh "sleep 60s"
+                             CommonMethods_cenm.import_backup()
+                             commonMethods.verify_restore_exist()
+                  }
+              }
+         }
+        stage('Install cENM Monitoring chart'){
+            when {
+                expression{env.monitoring_chart_version != ''}
+            }
+            steps{
+                script{
+                    if (commonMethods.check_version_a_newer_than_version_b("${env.product_set_version}","21.03.57")){
+                        commonMethods.monitoring_integration_chart("install","900s")
+                    }
+                    else {
+                        echo "Stage-Install cENM Monitoring chart is skipped due to old cENM PS version"
+                    }
+                }
+            }
+        }
+        stage('Install cENM PreDeploy chart'){
+            when {
+                expression{env.pre_deploy_chart_version != ''}
+            }
+            steps{
+                script{
+                    commonMethods.pre_deploy_integration_chart("install","300s")
+                }
+            }
+        }
+        stage('Verify Install cENM Infra chart') {
+            when {
+                 expression{env.product_set_version < "22.08.38" }
+            }
+            parallel {
+                stage('Install cENM Infra chart') {
+                    when {
+                          expression{env.infra_chart_version != ''}
+                    }
+                    steps {
+                        script{
+                            commonMethods.restore_infra()
+                        }
+                    }
+                }
+                stage('Verify the values in the configmap and perform restore') {
+                    steps {
+                        script{
+                            commonMethods.verify_restorestate_value_and_restore_default()
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    script{
+                        commonMethods.set_configmap_to_post_restore_state()
+                    }
+                }
+            }
+        }
+        stage('Verify Install cENM Infra chart with hooks'){
+            when {
+                expression{env.infra_chart_version != '' && env.product_set_version >= "22.08.38"}
+            }
+            steps{
+                script{
+                    CommonMethods_cenm.restore_infra()
+                }
+            }
+        }
+        stage('Install cENM Stateless chart'){
+              when {
+                 expression{env.stateless_chart_version != '' && env.product_set_version < "22.08.38" }
+              }
+             steps{
+                 script{
+                       commonMethods.stateless_integration_chart("install","3h")
+                       commonMethods.reset_restore_values_in_configmap()
+                       commonMethods.end_time_deployment()
+                     }
+                }
+        }
+        stage('Verify Install cENM Stateless chart with hooks'){
+            when {
+                expression{env.stateless_chart_version != '' && env.product_set_version >= "22.08.38"}
+            }
+            steps{
+                script{
+                    commonMethods.stateless_install_with_hook("install","4h")
+                    commonMethods.end_time_deployment()
+                }
+            }
+        }
+        stage('Smoke test'){
+            steps{
+                script{
+                    retry(5){
+                       commonMethods.smokeTest()
+                    }
+                }
+            }
+        }
+        stage('CheckPods Running'){
+            steps{
+                script{
+                    retry(5){
+                        commonMethods.checkHealthyPods()
+                    }
+                }
+            }
+        }
+        stage('Generate artifact file'){
+            steps{
+                script{
+                    commonMethods.generate_artifact_file()
+                }
+            }
+        }
+    }
+    post{
+        failure {
+            script{
+                def report = commonMethods.reportHeading("Failed")
+                report += commonMethods.printPods()
+                commonMethods.emailReport(report)
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                def report = commonMethods.reportHeading("Aborted")
+                report += commonMethods.printPods()
+                commonMethods.emailReport(report)
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                def report = commonMethods.reportHeading("Success")
+                report +=commonMethods.printPods()
+                commonMethods.emailReport(report)
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "Restore with ${deployment_mechanism} on: ${environment_name}"
+                currentBuild.description = "<b>Bro Chart Version = ${bro_chart_version}<br>Monitoring chart version = ${monitoring_chart_version}<br>Pre Deploy Chart Version = ${pre_deploy_chart_version}<br>Infra Chart Version = ${infra_chart_version}<br>Stateless Chart Version = ${stateless_chart_version}<br>Integration Value Version = ${integration_value_version}</b>"
+                sh("cat ${HOME_DIR}/cENM/Scripts/${integration_values_file_path}")
+                archiveArtifacts "cENM/Scripts/${integration_values_file_path}"
+            }
+        }
+    }
+}
+
+def clone_ci_repo(){
+   sh '''
+       [ -d eric-enm-integration-pipeline-code ] && rm -rf eric-enm-integration-pipeline-code
+        git clone ${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+   '''
+}
+/*
+def pullPatchset(){
+    if (env.GERRIT_REFSPEC !='' && env.GERRIT_REFSPEC != "refs/heads/master") {
+        sh '''
+        pwd
+        cd dets_automation_pipeline
+        pwd
+        git fetch ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline $GERRIT_REFSPEC && git checkout FETCH_HEAD
+        '''
+    }
+}*/

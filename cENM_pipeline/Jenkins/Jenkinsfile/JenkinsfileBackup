@@ -1,0 +1,146 @@
+def CommonMethods_cenm
+def commonMethods
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+            HOME_DIR = "${WORKSPACE}"
+            cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+            nexus_repositoryUrl = "https://arm902-eiffel004.athtem.eei.ericsson.se:8443/nexus/content/repositories/releases/"
+            helm_repository_release = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-helm/"
+            helm_repository_ci_internal = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/"
+            csar_package_name = "enm-installation-package"
+            Client_HOME ="/home/cenmbuild"
+            backupNameDefault = "${environment_name}_Default"
+            backupNameRollback = "${environment_name}_Rollback"
+            BUR_INVENTORY = "burInventory.csv"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline'
+                sh '''
+                    git remote set-url origin --push ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline
+                '''
+                clone_ci_repo()
+                //pullPatchset()
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/eric-enm-integration-pipeline-code/Jenkins/JobDSL/CommonMethods.groovy")
+                    CommonMethods_cenm = load("${env.WORKSPACE}/cENM_pipeline/Jenkins/JobDSL/CommonMethods_cenm.groovy")
+                }
+            }
+        }
+        stage('Delete docker image') {
+            steps {
+                script {
+                    commonMethods.delete_build_utilities_image()
+                }
+            }
+        }
+        stage('Pull docker image') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                configFileProvider([configFile(fileId: "burInventory.csv", targetLocation: "${env.WORKSPACE}")]) {}
+                configFileProvider([configFile(fileId: "inventory.csv", targetLocation: "${env.WORKSPACE}")]) {}
+                script{
+                      CommonMethods_cenm.extract_jq()
+                      CommonMethods_cenm.createDir()
+                      commonMethods.download_kube_config_file_from_dit()
+                      CommonMethods_cenm.install_kube()
+                      CommonMethods_cenm.read_site_config_info_from_dit()
+                      commonMethods.set_kube_config_file()
+                      CommonMethods_cenm.clusterID()
+                      CommonMethods_cenm.domainIPGet()
+                      CommonMethods_cenm.domainCheck()
+                      //commonMethods.get_cn_build_version_info()
+               }
+          }
+        }
+        stage('Backuprestore configuration'){
+            steps {
+                script{
+                    commonMethods.brocli_configuration()
+                                }
+                         }
+                }
+        stage('Backup with scope') {
+                steps {
+                    script{
+                           sh "${brocli} status"
+                           if(backup_scope.equals("ROLLBACK")){
+                               CommonMethods_cenm.backup_rollback()
+                               sh "${brocli} list"
+                           }
+                           else{
+                               CommonMethods_cenm.backup_restore()
+                               //commonMethods.creation_folder_in_sftp_server()
+                               CommonMethods_cenm.export_backup()
+                               sh "${brocli} list"
+                            }
+                        }
+                    }
+                }
+            }
+
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "Backup of: ${environment_name} with scope ${backup_scope}"
+            }
+        }
+    }
+}
+
+def clone_ci_repo(){
+   sh '''
+       [ -d eric-enm-integration-pipeline-code ] && rm -rf eric-enm-integration-pipeline-code
+        git clone ${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+   '''
+}
+/*
+def pullPatchset(){
+    if (env.GERRIT_REFSPEC !='' && env.GERRIT_REFSPEC != "refs/heads/master") {
+        sh '''
+        pwd
+        cd dets_automation_pipeline
+        pwd
+        git fetch ssh://gerrit.ericsson.se:29418/DETES/com.ericsson.de.stsoss/dets_automation_pipeline $GERRIT_REFSPEC && git checkout FETCH_HEAD
+        '''
+    }
+}*/
